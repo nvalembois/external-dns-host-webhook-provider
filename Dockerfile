@@ -1,4 +1,4 @@
-FROM docker.io/library/rust:1.82.0-alpine3.20 AS build
+FROM docker.io/library/rust:1.83.0-alpine3.20 AS build
 
 COPY Cargo.toml Cargo.lock /tmp/
 COPY src /tmp/src/
