@@ -9,7 +9,7 @@ RUN set -e && \
   apk add --no-cache musl-dev build-base && \
   cargo build --release
 
-FROM docker.io/library/alpine:3.20.3
+FROM docker.io/library/alpine:3.21.0
 
 COPY --from=build /tmp/target/release/host_webhook_provider /
 
