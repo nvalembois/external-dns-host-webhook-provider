@@ -26,7 +26,7 @@ jobs:
     steps:
       - 
         name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - 
         name: Push Tag with new version
         if: github.ref_type != 'tag'
@@ -44,7 +44,7 @@ jobs:
           body: ${{ steps.tag_version.outputs.changelog }}
       - 
         name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - 
         name: Set up QEMU
         uses: docker/setup-qemu-action@v3  # https://github.com/docker/setup-qemu-action
