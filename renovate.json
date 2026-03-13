@@ -1,23 +1,31 @@
 {
-    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "extends": [
-      "config:base"
-    ],
-    "baseBranches": ["latest"],
-    "timezone": "Europe/Paris",
-    "schedule": ["before 1am"],
-    "prCreation": "immediate",
-    "automerge": true,
-    "prHourlyLimit": 15,
-    "packageRules": [
-      {
-        "matchDatasources": ["github-tags", "github-runners"],
-        "groupName": "githubCi"
-      },
-      {
-        "matchManagers": [ "cargo" ],
-        "groupName": "rust"
-      }
-    ]
-  }
-  
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "baseBranchPatterns": [
+    "latest"
+  ],
+  "timezone": "Europe/Paris",
+  "schedule": [
+    "before 1am"
+  ],
+  "prCreation": "immediate",
+  "automerge": true,
+  "prHourlyLimit": 15,
+  "packageRules": [
+    {
+      "matchDatasources": [
+        "github-tags",
+        "github-runners"
+      ],
+      "groupName": "githubCi"
+    },
+    {
+      "matchManagers": [
+        "cargo"
+      ],
+      "groupName": "rust"
+    }
+  ]
+}
