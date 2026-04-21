@@ -37,7 +37,7 @@ jobs:
           release_branches: master,main,latest
       - 
         name: Create a GitHub release
-        uses: softprops/action-gh-release@v2 # https://github.com/ncipollo/release-action
+        uses: softprops/action-gh-release@v3 # https://github.com/ncipollo/release-action
         with:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ github.repository }} ${{ steps.tag_version.outputs.new_tag }}
