@@ -1,12 +1,9 @@
-use once_cell::sync::Lazy;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-pub static CONFIG: Lazy<Config> = Lazy::new(|| {Config::parse()});
-
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
-pub struct Config {
+pub struct AppConfig {
     #[arg(
         long,
         default_value_t = false)]
@@ -34,21 +31,21 @@ pub struct Config {
         long,
         value_name = "HOST_CM_KEY",
         env = "HOST_CM_KEY",
-        default_value_t = String::from("hosts"))]
+        default_value = "hosts")]
     pub host_configmap_key: String,
    
     #[arg(
         long,
         value_name = "LISTEN_ADDR",
         env = "LISTEN_ADDR",
-        default_value_t = String::from("127.0.0.1:8888"))]
+        default_value = "127.0.0.1:8888")]
     pub listen_addr: String,
 
     #[arg(
         long,
         value_name = "HEALTH_LISTEN_ADDR",
         env = "HEALTH_LISTEN_ADDR",
-        default_value_t = String::from("0.0.0.0:8080"))]
+        default_value = "0.0.0.0:8080")]
     pub health_listen_addr: String,
 
     #[command(flatten)]

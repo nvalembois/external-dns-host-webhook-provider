@@ -1,140 +1,156 @@
-use host_webhook_provider::config::CONFIG;
-use host_webhook_provider::health::get_healthz;
-use host_webhook_provider::records::{get_records, post_adjustendpoints, post_records};
-use salvo::logging::Logger;
-use salvo::server::ServerHandle;
-use salvo::prelude::*;
-use tokio::{signal, task};
-use futures::future::join_all;
-use std::time::Duration;
-use tracing::{debug, error, info};
-
-#[handler]
-async fn get_root(req: &mut Request, res: &mut Response) {
-    let domain_filter = CONFIG.domain_filter.clone();
-    debug!("domain_filter: {:?}", &domain_filter);
-
-    match serde_json::to_string(&domain_filter) {
-        Ok(v) => {
-            res.status_code(StatusCode::OK);
-            res.render(Text::Json(v));
-        }
-        Err(e) => {
-            error!("Erreur lors de la conversion en JSON: {}", e);
-            res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
-            res.render(Text::Plain("Erreur lors de la conversion en JSON"));
-        }
-    }
-
-    // Set Content-Type Header with Accept Header
-    if let Some(v) = req.header("Accept") {
-        let accept_header_value: String = v;
-        if let Err(err) = res.add_header("Content-Type", accept_header_value, true) {
-            res.status_code(StatusCode::BAD_REQUEST);
-            res.render(Text::Plain(format!("Failed to add header Content-Type: {}",err.to_string())));
-            return;
-        };
-    };
-}
-
-#[handler]
-async fn alter_content_type(req: &mut Request) {
-    if let Some(v) = req.header("Content-Type") {
-        let content_type: String = v;
-        if content_type == "application/external.dns.webhook+json;version=1" {
-            if let Err(e) = req.add_header("Content-Type", "application/json;version=1", true) {
-                info!("Failed to replace Content-Type: {:?}", e);
-            } else if CONFIG.debug {
-                debug!("modified content-type header application/external.dns.webhook+json;version=1 -> application/json;version=1")
-            }
-        }
-    }
-}
+use axum::routing::{get, post};
+use clap::Parser;
+use host_webhook_provider::model::config::AppConfig;
+use host_webhook_provider::model::configmap::ConfigMapStore;
+use host_webhook_provider::model::state::AppState;
+use host_webhook_provider::routes::health::get_healthz;
+use host_webhook_provider::routes::records::{get_records, post_adjustendpoints, post_records};
+use host_webhook_provider::routes::root::get_root;
+use axum::Router;
+use kube::Client;
+use tokio::net::TcpListener;
+use tokio::signal;
+use std::process::ExitCode;
+use std::sync::Arc;
+use tracing::{error, info};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
+    let app_config = Arc::new(AppConfig::parse());
+
     tracing_subscriber::fmt()
-        .with_max_level(if CONFIG.debug {tracing::Level::DEBUG} else { tracing::Level::INFO} )
+        .with_max_level(if app_config.debug {tracing::Level::DEBUG} else { tracing::Level::INFO} )
         .init();
 
-    info!("Config: filters={}", &CONFIG.domain_filter.filters.join(","));
-    info!("Config: exclude={}", &CONFIG.domain_filter.exclude.join(","));
-    info!("Config: regex={}", &CONFIG.domain_filter.regex);
-    info!("Config: regex_exclusion={}", &CONFIG.domain_filter.regex_exclusion);
-    info!("Config: host_configmap_name={}", &CONFIG.host_configmap_name);
-    info!("Config: host_configmap_namespace={}", CONFIG.host_configmap_namespace.as_deref().unwrap_or(""));
-    info!("Config: host_configmap_key={}", &CONFIG.host_configmap_key);
-    info!("Config: listen_addr={}", &CONFIG.listen_addr);
-    info!("Config: health_listen_addr={}", &CONFIG.health_listen_addr);
-    info!("Config: dry_run={}", &CONFIG.dry_run);
-    info!("Config: debug={}", &CONFIG.debug);
+    info!("Config: filters={}", &app_config.domain_filter.filters.join(","));
+    info!("Config: exclude={}", &app_config.domain_filter.exclude.join(","));
+    info!("Config: regex={}", &app_config.domain_filter.regex);
+    info!("Config: regex_exclusion={}", &app_config.domain_filter.regex_exclusion);
+    info!("Config: host_configmap_name={}", &app_config.host_configmap_name);
+    info!("Config: host_configmap_namespace={}", app_config.host_configmap_namespace.as_deref().unwrap_or(""));
+    info!("Config: host_configmap_key={}", &app_config.host_configmap_key);
+    info!("Config: listen_addr={}", &app_config.listen_addr);
+    info!("Config: health_listen_addr={}", &app_config.health_listen_addr);
+    info!("Config: dry_run={}", &app_config.dry_run);
+    info!("Config: debug={}", &app_config.debug);
 
-    // webhook
-    let router_webhook = Router::new()
-        .hoop(alter_content_type)
-        .get(get_root)
-        .push(Router::with_path("records").get(get_records).post(post_records))
-        .push(Router::with_path("adjustendpoints").post(post_adjustendpoints));
-    let service_webhook = Service::new(router_webhook)
-        .hoop(Logger::new());
-    let acceptor_webhook = TcpListener::new(&CONFIG.listen_addr)
-        .bind().await;
-    let server_webhook = Server::new(acceptor_webhook);
-    
-    // health
-    let router_health = Router::new()
-        .push(Router::with_path("healthz").get(get_healthz));
-    let service_health = Service::new(router_health);
-    let acceptor_health = TcpListener::new(&CONFIG.health_listen_addr)
-        .bind().await;
-    let server_health = Server::new(acceptor_health);
-
-    // handle shutdown
-    let mut handles: Vec<ServerHandle> = Vec::new();
-    handles.push(server_webhook.handle());
-    handles.push(server_health.handle());
-    tokio::spawn(listen_shutdown_signal(handles));
-
-    // start servers
-    let task_webhook = task::spawn(async move {server_webhook.serve(service_webhook).await;});
-    let task_health = task::spawn(async move {server_health.serve(service_health).await;});
-    task_webhook.await.unwrap();
-    task_health.await.unwrap();
+    match run(app_config).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("{e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-async fn listen_shutdown_signal(handles: Vec<ServerHandle>) {
-    // Wait Shutdown Signal
+async fn run(app_config: Arc<AppConfig>) -> Result<(), String> {
+    let client = Client::try_default().await
+        .map_err(|e| format!("K8S client error : {e}"))?;
+    let namespace = match app_config.host_configmap_namespace.clone() {
+        Some(v) => v,
+        None => client.default_namespace().to_string()
+    };
+    let cm_store = Arc::new(ConfigMapStore::new(
+        client,
+        &namespace,
+        &app_config.host_configmap_name,
+        &app_config.host_configmap_key).await
+        
+        .map_err(|e| format!("ConfigMap store init error : {e}"))?);
+        
+    // Create `TcpListener` using tokio
+    let webhook_listener = TcpListener::bind(app_config.listen_addr.clone()).await
+        .map_err(|e| format!("Listen for webhok error : {e}"))?;
+    let health_listener = TcpListener::bind(app_config.health_listen_addr.clone()).await
+        .map_err(|e| format!("Listen for health error : {e}"))?;
+    
+    // Create `Router`
+    let webhook_router = Router::new()
+        .route("/records", get(get_records))
+        .route("/records", post(post_records))
+        .route("/adjustendpoints", post(post_adjustendpoints))
+        .route("/", get(get_root))
+        .with_state(AppState{ cm_store, app_config});
+    let health_router = Router::new()
+        .route("/healthz", get(get_healthz));
+
+    // Run the servers with graceful shutdown
+    let webhook = axum::serve(webhook_listener, webhook_router)
+        .with_graceful_shutdown(shutdown_signal());
+    let health = axum::serve(health_listener, health_router)
+        .with_graceful_shutdown(shutdown_signal());
+     
+        // Les deux serveurs tournent en parallèle sur la même tâche async
+    let (webhook_result, health_result) = tokio::join!(webhook, health);
+
+    if let Err(e) = health_result {
+        error!("Shutdown server health error : {e}");
+    }
+    webhook_result.
+        map_err(|e| format!("Shutdown server webhook error : {e}"))
+}
+
+async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
-            .expect("failed to install Ctrl+C handler");
+            .expect("échec de l'installation du handler Ctrl+C");
     };
 
     #[cfg(unix)]
     let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
+            .expect("échec de l'installation du handler SIGTERM")
             .recv()
             .await;
     };
 
-    #[cfg(windows)]
-    let terminate = async {
-        signal::windows::ctrl_c()
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => println!("ctrl_c signal received"),
-        _ = terminate => println!("terminate signal received"),
-    };
-
-    async fn async_stop(handle: &ServerHandle) {
-        handle.stop_graceful(Duration::from_secs(60*5));
+        _ = ctrl_c => {
+            println!("Signal Ctrl+C reçu, arrêt en cours...");
+        },
+        _ = terminate => {
+            println!("Signal SIGTERM reçu, arrêt en cours...");
+        },
     }
-
-    let tasks: Vec<_> = handles.iter().map(|h| async_stop(h)).collect();
-    _ = join_all(tasks).await;
 }
+
+// async fn listen_shutdown_signal(handles: Vec<ServerHandle>) {
+//     // Wait Shutdown Signal
+//     let ctrl_c = async {
+//         signal::ctrl_c()
+//             .await
+//             .expect("failed to install Ctrl+C handler");
+//     };
+
+//     #[cfg(unix)]
+//     let terminate = async {
+//         signal::unix::signal(signal::unix::SignalKind::terminate())
+//             .expect("failed to install signal handler")
+//             .recv()
+//             .await;
+//     };
+
+//     #[cfg(windows)]
+//     let terminate = async {
+//         signal::windows::ctrl_c()
+//             .expect("failed to install signal handler")
+//             .recv()
+//             .await;
+//     };
+
+//     tokio::select! {
+//         _ = ctrl_c => println!("ctrl_c signal received"),
+//         _ = terminate => println!("terminate signal received"),
+//     };
+
+//     async fn async_stop(handle: &ServerHandle) {
+//         handle.stop_graceful(Duration::from_secs(60*5));
+//     }
+
+//     let tasks: Vec<_> = handles.iter().map(|h| async_stop(h)).collect();
+//     _ = join_all(tasks).await;
+// }
