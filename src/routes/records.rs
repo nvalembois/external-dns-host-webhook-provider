@@ -1,15 +1,17 @@
+use std::sync::Arc;
+
 use axum::{Json, extract::State, http::{StatusCode, header}, response::IntoResponse};
 use tracing::debug;
 
-use crate::{model::{records::{Changes, Records}, state::AppState}, routes::WEBHOOK_CONTENT_TYPE};
+use crate::{model::{configmap::ConfigMapStore, records::{Changes, Records}, state::AppState}, routes::WEBHOOK_CONTENT_TYPE};
 
 #[axum::debug_handler]
 pub async fn get_records(
-    State(cm_store): State<ConfigMapStore>
+    State(cm_store): State<Arc<ConfigMapStore>>
 ) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, WEBHOOK_CONTENT_TYPE)], 
-        Json(state.cm_store.into_endpoints().await)
+        Json(cm_store.into_endpoints().await)
     )
 }
 
