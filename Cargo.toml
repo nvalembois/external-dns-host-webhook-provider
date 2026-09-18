@@ -24,3 +24,12 @@ k8s-openapi = { version = "0", features = ["v1_35"] }
 axum = { version="0", features = ["macros"] }
 tower = "0"
 
+[profile.release]
+opt-level = "z"     # optimise pour la taille (utile pour scratch/distroless)
+lto = true          # link-time optimization, réduit la taille et améliore les perfs
+codegen-units = 1   # meilleure optimisation, compilation plus lente
+panic = "abort"     # évite d'embarquer le code de unwinding, réduit la taille
+strip = true        # supprime les symboles de debug automatiquement (Rust 1.59+)
+
+[target.'cfg(target_env = "musl")']
+rustflags = ["-C", "target-feature=+crt-static"]
