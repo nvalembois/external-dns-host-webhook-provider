@@ -76,9 +76,9 @@ async fn run(app_config: Arc<AppConfig>) -> Result<(), String> {
 
     // Run the servers with graceful shutdown
     let webhook = axum::serve(webhook_listener, webhook_router)
-        .with_graceful_shutdown(shutdown_signal());
+        .with_graceful_shutdown(shutdown_signal_webhook());
     let health = axum::serve(health_listener, health_router)
-        .with_graceful_shutdown(shutdown_signal());
+        .with_graceful_shutdown(shutdown_signal_health());
      
         // Les deux serveurs tournent en parallèle sur la même tâche async
     let (webhook_result, health_result) = tokio::join!(webhook, health);
@@ -90,7 +90,16 @@ async fn run(app_config: Arc<AppConfig>) -> Result<(), String> {
         map_err(|e| format!("Shutdown server webhook error : {e}"))
 }
 
-async fn shutdown_signal() {
+
+async fn shutdown_signal_webhook() {
+    shutdown_signal("webhook").await
+}
+
+async fn shutdown_signal_health() {
+    shutdown_signal("health").await
+}
+
+async fn shutdown_signal(server: &str) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -110,47 +119,13 @@ async fn shutdown_signal() {
 
     tokio::select! {
         _ = ctrl_c => {
-            println!("Signal Ctrl+C reçu, arrêt en cours...");
+            info!("Signal Ctrl+C reçu, arrêt de {server} en cours...");
         },
         _ = terminate => {
-            println!("Signal SIGTERM reçu, arrêt en cours...");
+            info!("Signal SIGTERM reçu, arrêt de {server} en cours...");
         },
     }
 }
 
-// async fn listen_shutdown_signal(handles: Vec<ServerHandle>) {
-//     // Wait Shutdown Signal
-//     let ctrl_c = async {
-//         signal::ctrl_c()
-//             .await
-//             .expect("failed to install Ctrl+C handler");
-//     };
 
-//     #[cfg(unix)]
-//     let terminate = async {
-//         signal::unix::signal(signal::unix::SignalKind::terminate())
-//             .expect("failed to install signal handler")
-//             .recv()
-//             .await;
-//     };
 
-//     #[cfg(windows)]
-//     let terminate = async {
-//         signal::windows::ctrl_c()
-//             .expect("failed to install signal handler")
-//             .recv()
-//             .await;
-//     };
-
-//     tokio::select! {
-//         _ = ctrl_c => println!("ctrl_c signal received"),
-//         _ = terminate => println!("terminate signal received"),
-//     };
-
-//     async fn async_stop(handle: &ServerHandle) {
-//         handle.stop_graceful(Duration::from_secs(60*5));
-//     }
-
-//     let tasks: Vec<_> = handles.iter().map(|h| async_stop(h)).collect();
-//     _ = join_all(tasks).await;
-// }
