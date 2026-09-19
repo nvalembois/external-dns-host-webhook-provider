@@ -78,7 +78,7 @@ impl ConfigMapStore {
         let data = BTreeMap::from([(self.key.clone(), hosts.to_string())]);
         match self.api.get_metadata_opt(&self.name).await? {
             Some(_) => {
-                let patch = Patch::Apply(ConfigMapPatch{data: data});
+                let patch = Patch::Merge(ConfigMapPatch{data: data});
                 let params = PatchParams::default();
                 self.api.patch(&self.name, &params, &patch).await.map(|_| ())
             },
